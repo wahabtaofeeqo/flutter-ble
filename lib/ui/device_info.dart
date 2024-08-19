@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 
 import 'package:bluetest/ble/ble_device_interactor.dart';
 import 'package:bluetest/main.dart';
@@ -26,16 +27,20 @@ class _DeviceInfoState extends State<DeviceInfo> {
 
   DeviceConnectionState? connectionState;
   late BleDeviceInteractor serviceDiscoverer;
+  
+  StreamSubscription<ConnectionStateUpdate>? _connection;
 
   final SERVICE_ID = "0000fff0-0000-1000-8000-00805f9b34fb";
-  final DATA_CHARACTER_ID = "0000ff0b-0000-1000-8000-00805f9b34fb";
-  final NOTIFY_CHARACTER_ID = "0000ff0a-0000-1000-8000-00805f9b34fb";
+  final BLE_TO_MSA_CHARACTER_ID = "0000ff0b-0000-1000-8000-00805f9b34fb";
+  final MSA_TO_BLE_CHARACTER_ID = "0000ff0a-0000-1000-8000-00805f9b34fb";
   
   String output = "";
-  Characteristic? dataCharacteristic;
-  Characteristic? notifyCharacteristic;
+  Characteristic? bleToMsaCharacteristic;
+  Characteristic? msaToBleCharacteristic;
 
   Timer? timer;
+  int recordNumber = 0;
+  bool isFirstPacket = false;
 
   @override
   void initState() {
@@ -48,6 +53,7 @@ class _DeviceInfoState extends State<DeviceInfo> {
       logMessage: bleLogger.addToLog,
       readRssi: ble.readRssi,
     );
+
 
     //
     super.initState();
@@ -64,7 +70,6 @@ class _DeviceInfoState extends State<DeviceInfo> {
     for (var element in result) {
       if(element.id.toString() == SERVICE_ID) {
         getCharacteristics(element);
-        break;
       }
     }
 
@@ -75,56 +80,95 @@ class _DeviceInfoState extends State<DeviceInfo> {
 
   getCharacteristics(Service service) {
     for (var element in service.characteristics) {
-      if(element.id.toString() == NOTIFY_CHARACTER_ID) {
+      if(element.id.toString() == BLE_TO_MSA_CHARACTER_ID) {
         setState(() {
-          notifyCharacteristic = element;
-          isNotifiable = element.isNotifiable;
+          bleToMsaCharacteristic = element;
         });
-        subToCharacteristic(element);
+        syncDate(bleToMsaCharacteristic!);
       }
 
-      if(element.id.toString() == DATA_CHARACTER_ID) {
-       setState(() {
-         dataCharacteristic = element;
-       });
-       syncDate(element);
+      if(element.id.toString() == MSA_TO_BLE_CHARACTER_ID) {
+        setState(() {
+          msaToBleCharacteristic = element;
+        });
+        subToCharacteristic(msaToBleCharacteristic!);
       }
     }
   }
 
-  subToCharacteristic(Characteristic characteristic) {
-    characteristic.subscribe().listen((event) async {
-      String value = utf8.decode(event);
-      setState(() {
-        output = value;
-      });
+  Future<void> subToCharacteristic(Characteristic characteristic) async {
 
-      if(value.toLowerCase() == "sync time completed") {
-        startPolling();
+    final char = QualifiedCharacteristic(serviceId: Uuid.parse(SERVICE_ID), characteristicId: characteristic.id, deviceId: widget.device.id);
+    ble.subscribeToCharacteristic(char).listen((event) {
+
+      int instructionType = event[0];
+      if(instructionType == 170) {
+
+        // Get status
+        int status = event[1];
+        if(status == 5) { // start polling
+          startPolling();
+        }
+
+        if(status == 6) { // Stop polling
+          timer?.cancel();
+
+          // Ask for number of records
+          writeData(bleToMsaCharacteristic!, [0x55, 01]); 
+        }
+
+        if(status == 1) { // Record number is back
+          setState(() {
+            isFirstPacket = true;
+          });
+          recordNumber = event[event.length - 2];
+          writeData(bleToMsaCharacteristic!, [0x55, 02, 01, 00]);
+        }
+
+        if(status == 3) {
+          print("Record deleted succesfully");
+        }
       }
 
-      if(value.toLowerCase() == "measuring completed") {
-        timer!.cancel();
-        await dataCharacteristic!.write([55, 01], withResponse: true);
-        await dataCharacteristic!.write([55, 02, 01, 00], withResponse: true);
+      if(instructionType == 221) {
+        print("$event");
+        if(isFirstPacket) {
+           setState(() {
+            isFirstPacket = false;
+          });
+          writeData(bleToMsaCharacteristic!, [0x55, 02, recordNumber, 00]); 
+        }
+        else { // Delete historical records 
+          writeData(bleToMsaCharacteristic!, [0x55, 03]); 
+        }
       }
     });
   }
 
-  syncDate(Characteristic characteristic) async {
+  Future<void> writeData(Characteristic characteristic, List<int> data) async {
+    final char = QualifiedCharacteristic(serviceId: Uuid.parse(SERVICE_ID), characteristicId: characteristic.id, deviceId: widget.device.id);
+    await ble.writeCharacteristicWithResponse(char, value: data);
+  }
+
+  Future<void> syncDate(Characteristic characteristic) async {
     var dateUtc = DateTime.now();
     var formatter = DateFormat("yyyyMMddHHss");
-    String date = "0xdd${formatter.format(dateUtc)}";
-    await characteristic.write(date.codeUnits, withResponse: true);
+    List<int> dateBytes = [0xDD];
+    dateBytes.addAll(utf8.encode(formatter.format(dateUtc)));
+    writeData(characteristic, dateBytes);
   }
 
   startPolling() {
     timer = Timer.periodic(
       const Duration(milliseconds: 500),
       (timer) async {
-        await dataCharacteristic!.write([55, 06], withResponse: true);
+        await writeData(bleToMsaCharacteristic!, [0x55, 06]);
       },
     );
+  }
+
+  Future<void> startReading() async {
+    subToCharacteristic(msaToBleCharacteristic!);
   }
 
   Future<void> readRssi() async {
@@ -135,12 +179,15 @@ class _DeviceInfoState extends State<DeviceInfo> {
   }
 
   connect() {
-    ble.connectToDevice(
+    _connection = ble.connectToDevice(
       id: widget.device.id,
       connectionTimeout: const Duration(seconds: 2),).listen((state) {
       setState(() {
         connectionState = state.connectionState;
         deviceConnected =  state.connectionState == DeviceConnectionState.connected;
+        if(deviceConnected) {
+          discoverServices();
+        }
       });
     }, onError: (Object error) {
       // Handle a possible error
@@ -149,7 +196,11 @@ class _DeviceInfoState extends State<DeviceInfo> {
   }
 
   disconnect() {
-    connector.disconnect(widget.device.id);
+    _connection?.cancel();
+    connectionState = null;
+    deviceConnected = false;
+    setState(() {});
+    // connector.disconnect(widget.device.id);
   }
 
   @override

@@ -75,6 +75,8 @@ class _CharacteristicInteractionDialogState extends State<_CharacteristicInterac
     final result = await widget.characteristic.read();
     setState(() {
       readOutput = utf8.decode(result); //result.toString();
+      print(readOutput);
+      print(result);
     });
   }
 

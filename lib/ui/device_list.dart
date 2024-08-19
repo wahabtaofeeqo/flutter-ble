@@ -22,6 +22,8 @@ class _DeviceList extends StatefulWidget {
 }
 
 class _DeviceListState extends State<_DeviceList> {
+  final List<DiscoveredDevice> _devices = [];
+  final flutterReactiveBle = FlutterReactiveBle();
 
   @override
   void initState() {
@@ -44,7 +46,22 @@ class _DeviceListState extends State<_DeviceList> {
   }
 
   void _startScanning() {
-    scanner.startScan([]);
+    // FlutterReactiveBle 
+    Uuid serviceId = Uuid.parse("0000fff0-0000-1000-8000-00805f9b34fb");
+    flutterReactiveBle.scanForDevices(withServices: [serviceId], scanMode: ScanMode.lowLatency).listen((device) {
+       final knownDeviceIndex = _devices.indexWhere((d) => d.id == device.id);
+      if (knownDeviceIndex >= 0) {
+        _devices[knownDeviceIndex] = device;
+      } else {
+        _devices.add(device);
+      }
+      setState(() {});
+    }, onError: (e) {
+      // print("Error $e");
+      //code for handling error
+    });
+
+    // scanner.startScan([Uuid.parse("0000fff0-0000-1000-8000-00805f9b34fb")]);
   }
 
   @override
@@ -52,67 +69,78 @@ class _DeviceListState extends State<_DeviceList> {
         appBar: AppBar(
           title: const Text('Scan for devices'),
         ),
-        body: StreamBuilder(
-          stream: scanner.state,
-          initialData: const BleScannerState(
-            discoveredDevices: [],
-            scanIsInProgress: false
-          ),
-          builder: (context, snapshot) {
-            if(snapshot.hasData) {
-              return ListView.builder(
-                itemCount: snapshot.data!.discoveredDevices.length,
-                itemBuilder: (context, index) {
-                  dynamic device = snapshot.data!.discoveredDevices[index];
-                  return ListTile(
-                    title: Text(
-                    device.name),
-                    subtitle: Text(
-                      """
-                      ${device.id}
-                      RSSI: ${device.rssi}
-                      ${device.connectable}
-                      """,
-                    ),
-                    // leading: const Icon(Icons.abc),
-                    onTap: () async {
-                      scanner.stopScan();
-                      await Navigator.push<void>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => DeviceInfo(device: device),
-                        ),
-                      );
-                    },
-                  );
-                },
-              );
-            }
-            else if(snapshot.hasError) {
-              return const Text("Oops!");
-            }
-            else if(!snapshot.hasData) {
-              return const Text("No Devices yet");
-            }
-            else {
-              return Container();
-            }
-            // if(snapshot.data!.scanIsInProgress) {
-            //   return const LinearProgressIndicator();
-            // }
-            // else if(snapshot.hasData) {
-            //   snapshot.data!.discoveredDevices.map((device) {
-            //     return Container();
-            //   });
-            // }
-            // else if(snapshot.hasError) {
-            //   return Container();
-            // }
-            // else {
-            //   return Container();
-            // }
-            // return Container();
+        body: ListView.builder(
+          itemCount: _devices.length,
+          itemBuilder: (context, index) {
+            dynamic device = _devices[index];
+            return ListTile(
+              title: Text(
+              device.name),
+              subtitle: Text(
+                """
+                ${device.id}
+                RSSI: ${device.rssi}
+                ${device.connectable}
+                """,
+              ),
+              // leading: const Icon(Icons.abc),
+              onTap: () async {
+                scanner.stopScan();
+                await Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DeviceInfo(device: device),
+                  ),
+                );
+              },
+            );
           },
+        // body: StreamBuilder(
+        //   stream: scanner.state,
+        //   initialData: const BleScannerState(
+        //     discoveredDevices: [],
+        //     scanIsInProgress: false
+        //   ),
+        //   builder: (context, snapshot) {
+        //     if(snapshot.hasData) {
+        //       return ListView.builder(
+        //         itemCount: snapshot.data!.discoveredDevices.length,
+        //         itemBuilder: (context, index) {
+        //           dynamic device = snapshot.data!.discoveredDevices[index];
+        //           return ListTile(
+        //             title: Text(
+        //             device.name),
+        //             subtitle: Text(
+        //               """
+        //               ${device.id}
+        //               RSSI: ${device.rssi}
+        //               ${device.connectable}
+        //               """,
+        //             ),
+        //             // leading: const Icon(Icons.abc),
+        //             onTap: () async {
+        //               scanner.stopScan();
+        //               await Navigator.push<void>(
+        //                 context,
+        //                 MaterialPageRoute(
+        //                   builder: (_) => DeviceInfo(device: device),
+        //                 ),
+        //               );
+        //             },
+        //           );
+        //         },
+        //       );
+        //     }
+        //     else if(snapshot.hasError) {
+        //       return const Text("Oops!");
+        //     }
+        //     else if(!snapshot.hasData) {
+        //       return const Text("No Devices yet");
+        //     }
+        //     else {
+        //       return Container();
+        //     }
+        //   },
         ),
         floatingActionButton: FloatingActionButton(
           onPressed: _startScanning,
