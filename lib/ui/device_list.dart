@@ -23,20 +23,19 @@ class _DeviceList extends StatefulWidget {
 
 class _DeviceListState extends State<_DeviceList> {
   final List<DiscoveredDevice> _devices = [];
-  final flutterReactiveBle = FlutterReactiveBle();
 
   @override
   void initState() {
     super.initState();
 
-    BleDeviceInteractor(
-      bleDiscoverServices: (deviceId) async {
-        await ble.discoverAllServices(deviceId);
-        return ble.getDiscoveredServices(deviceId);
-      },
-      logMessage: bleLogger.addToLog,
-      readRssi: ble.readRssi,
-    );
+    // BleDeviceInteractor(
+    //   bleDiscoverServices: (deviceId) async {
+    //     await ble.discoverAllServices(deviceId);
+    //     return ble.getDiscoveredServices(deviceId);
+    //   },
+    //   logMessage: bleLogger.addToLog,
+    //   readRssi: ble.readRssi,
+    // );
   }
 
   @override
@@ -46,9 +45,8 @@ class _DeviceListState extends State<_DeviceList> {
   }
 
   void _startScanning() {
-    // FlutterReactiveBle 
     Uuid serviceId = Uuid.parse("0000fff0-0000-1000-8000-00805f9b34fb");
-    flutterReactiveBle.scanForDevices(withServices: [serviceId], scanMode: ScanMode.lowLatency).listen((device) {
+    ble.scanForDevices(withServices: [serviceId], scanMode: ScanMode.lowLatency).listen((device) {
        final knownDeviceIndex = _devices.indexWhere((d) => d.id == device.id);
       if (knownDeviceIndex >= 0) {
         _devices[knownDeviceIndex] = device;
@@ -60,8 +58,6 @@ class _DeviceListState extends State<_DeviceList> {
       // print("Error $e");
       //code for handling error
     });
-
-    // scanner.startScan([Uuid.parse("0000fff0-0000-1000-8000-00805f9b34fb")]);
   }
 
   @override

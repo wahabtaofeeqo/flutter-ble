@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 
 import 'package:bluetest/ble/ble_device_interactor.dart';
 import 'package:bluetest/main.dart';
@@ -42,19 +41,20 @@ class _DeviceInfoState extends State<DeviceInfo> {
   int recordNumber = 0;
   bool isFirstPacket = false;
 
+  List<ReadValue> values = [];
+
   @override
   void initState() {
     discoveredServices = [];
-    serviceDiscoverer = BleDeviceInteractor(
-      bleDiscoverServices: (deviceId) async {
-        await ble.discoverAllServices(deviceId);
-        return ble.getDiscoveredServices(deviceId);
-      },
-      logMessage: bleLogger.addToLog,
-      readRssi: ble.readRssi,
-    );
-
-
+    // serviceDiscoverer = BleDeviceInteractor(
+    //   bleDiscoverServices: (deviceId) async {
+    //     await ble.discoverAllServices(deviceId);
+    //     return ble.getDiscoveredServices(deviceId);
+    //   },
+    //   logMessage: bleLogger.addToLog,
+    //   readRssi: ble.readRssi,
+    // );
+    
     //
     super.initState();
   }
@@ -131,11 +131,24 @@ class _DeviceInfoState extends State<DeviceInfo> {
       }
 
       if(instructionType == 221) {
-        print("$event");
         if(isFirstPacket) {
            setState(() {
             isFirstPacket = false;
           });
+
+          var firstPacket;
+          var secondPacket;
+
+          if(event.length >= 16) { // 2 packets
+            firstPacket = event.sublist(0, 9);
+            secondPacket = event.sublist(9, event.length - 1);
+            handleReading(firstPacket);
+            handleReading(secondPacket);
+          }
+          else {
+            handleReading(event);
+          }
+
           writeData(bleToMsaCharacteristic!, [0x55, 02, recordNumber, 00]); 
         }
         else { // Delete historical records 
@@ -156,6 +169,54 @@ class _DeviceInfoState extends State<DeviceInfo> {
     List<int> dateBytes = [0xDD];
     dateBytes.addAll(utf8.encode(formatter.format(dateUtc)));
     writeData(characteristic, dateBytes);
+  }
+
+  handleReading(List<int> values) {
+  
+    // Convert to Hex
+    var convertedValues = toHex(values);
+
+    // Extract time HEXs
+    var fevHex = convertedValues.sublist(5, 7);
+    var timestampHex = convertedValues.sublist(1, 5);
+    var pevHex = convertedValues.sublist(7, convertedValues.length - 1);
+
+    List<String> paddedFev = padOrAdd(fevHex);
+    List<String> paddedPev = padOrAdd(pevHex);
+
+    int decodedFev = toDec(paddedFev.join());
+    int decodedPev = toDec(paddedPev.join());
+
+    int timestamp = int.parse(timestampHex.reversed.toList().join(), radix: 16);
+    var date = (DateTime.fromMillisecondsSinceEpoch(timestamp * 1000));
+
+    setState(() {
+      this.values.add(ReadValue(date.toString(), "${decodedFev}LPEF", "${decodedPev}L/min"));
+    });
+  }
+
+   padOrAdd(List<String> values) {
+    if(values.length == 1) {
+      values.add("00");
+    }
+    else {
+      values = values.map((e) {
+        if(e.length == 1) {
+          e = e.padLeft(2, "0");
+        }
+        return e;
+      }).toList();
+    }
+
+    return values.reversed.toList();
+  }
+
+  toHex(List<int> bytes) {
+    return bytes.map((e) => e.toRadixString(16).padLeft(2, '0')).toList();
+  }
+
+  toDec(String value) {
+    return int.parse(value, radix: 16);
   }
 
   startPolling() {
@@ -210,22 +271,23 @@ class _DeviceInfoState extends State<DeviceInfo> {
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(10),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Name: ${widget.device.name}"),
-          Padding(
-            padding: const EdgeInsetsDirectional.only(top: 8.0, bottom: 16.0, start: 16.0),
-            child: Text(
-              "ID: ${widget.device.id}",
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsetsDirectional.only(start: 16.0),
-            child: Text(
-              "Connectable: ${widget.device.connectable}",
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
+          // Text("Name: ${widget.device.name}"),
+          // Padding(
+          //   padding: const EdgeInsetsDirectional.only(top: 8.0, bottom: 16.0, start: 16.0),
+          //   child: Text(
+          //     "ID: ${widget.device.id}",
+          //     style: const TextStyle(fontWeight: FontWeight.bold),
+          //   ),
+          // ),
+          // Padding(
+          //   padding: const EdgeInsetsDirectional.only(start: 16.0),
+          //   child: Text(
+          //     "Connectable: ${widget.device.connectable}",
+          //     style: const TextStyle(fontWeight: FontWeight.bold),
+          //   ),
+          // ),
 
           Padding(
             padding: const EdgeInsetsDirectional.only(start: 16.0),
@@ -235,50 +297,63 @@ class _DeviceInfoState extends State<DeviceInfo> {
             ),
           ),
 
-          Padding(
-            padding: const EdgeInsetsDirectional.only(start: 16.0),
-            child: Text(
-              "Rssi: $_rssi dB",
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
+          // Padding(
+          //   padding: const EdgeInsetsDirectional.only(start: 16.0),
+          //   child: Text(
+          //     "Rssi: $_rssi dB",
+          //     style: const TextStyle(fontWeight: FontWeight.bold),
+          //   ),
+          // ),
 
           Padding(
             padding: const EdgeInsets.only(top: 16.0),
             child: Wrap(
-              alignment: WrapAlignment.spaceEvenly,
+              alignment: WrapAlignment.start,
               children: <Widget>[
                 ElevatedButton(
                   onPressed: !deviceConnected ? connect : null,
                   child: const Text("Connect"),
                 ),
-                ElevatedButton(
-                  onPressed: deviceConnected ? disconnect : null,
-                  child: const Text("Disconnect"),
-                ),
-                ElevatedButton(
-                  onPressed: deviceConnected ? discoverServices : null,
-                  child: const Text("Discover Services"),
-                ),
-                ElevatedButton(
-                  onPressed: deviceConnected
-                      ? readRssi
-                      : null,
-                  child: const Text("Get RSSI"),
-                ),
+                // ElevatedButton(
+                //   onPressed: deviceConnected ? disconnect : null,
+                //   child: const Text("Disconnect"),
+                // ),
+                // ElevatedButton(
+                //   onPressed: deviceConnected ? discoverServices : null,
+                //   child: const Text("Discover Services"),
+                // ),
+                // ElevatedButton(
+                //   onPressed: deviceConnected
+                //       ? readRssi
+                //       : null,
+                //   child: const Text("Get RSSI"),
+                // ),
               ],
             ),
           ),
+          
+          ListView.builder(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(10),
+            itemCount: values.length,
+            itemBuilder: (context, index) {
+              var model = values[index];
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(model.date),
+                  Text(model.pev),
+                  Text(model.fev),
+                ],
+              );
+            },
+          )
 
-          Text("Notifiable: $isNotifiable"),
-          const SizedBox(height: 10),
-          Text("Output: $output"),
-
-          if (deviceConnected)
-            _ServiceDiscoveryList(
-              deviceId: widget.device.id,
-              discoveredServices: discoveredServices,
-          ),
+          // if (deviceConnected)
+          //   _ServiceDiscoveryList(
+          //     deviceId: widget.device.id,
+          //     discoveredServices: discoveredServices,
+          // ),
         ],
       ),
     )
@@ -413,4 +488,12 @@ class _ServiceDiscoveryListState extends State<_ServiceDiscoveryList> {
         children: buildPanels(),
     ),
   );
+}
+
+class ReadValue {
+  String pev;
+  String fev;
+  String date;
+
+  ReadValue(this.date, this.fev, this.pev);
 }

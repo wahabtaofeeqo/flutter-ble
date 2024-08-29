@@ -20,8 +20,10 @@ void main() {
   ble = FlutterReactiveBle();
   bleLogger = BleLogger(ble: ble);
   monitor = BleStatusMonitor(ble);
+
   connector = BleDeviceConnector(
     ble: ble, logMessage: bleLogger.addToLog);
+
   scanner = BleScanner(
     ble: ble, logMessage: bleLogger.addToLog);
 
@@ -111,17 +113,18 @@ class _MyHomePageState extends State<MyHomePage> {
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: StreamBuilder(
-        stream: monitor.state,
-        initialData: BleStatus.unknown,
-        builder: (context, snapshot) {
-          if (snapshot.data! == BleStatus.ready) {
-            return const DeviceListScreen();
-          } else {
-            return BleStatusScreen(status: snapshot.data ?? BleStatus.unknown);
-          }
-        },
-      ),
+      body: const DeviceListScreen(),
+      // body: StreamBuilder(
+      //   stream: monitor.state,
+      //   initialData: BleStatus.unknown,
+      //   builder: (context, snapshot) {
+      //     if (snapshot.data! == BleStatus.ready) {
+      //       return const DeviceListScreen();
+      //     } else {
+      //       return BleStatusScreen(status: snapshot.data ?? BleStatus.unknown);
+      //     }
+      //   },
+      // ),
     );
   }
 }

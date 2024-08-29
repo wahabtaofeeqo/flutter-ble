@@ -41,6 +41,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  conversion:
+    dependency: "direct main"
+    description:
+      name: conversion
+      sha256: "76b85b89920ec4bc1366557e8aa92c4851d54dad6283995c7f97a53ac2027107"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0+1"
   cupertino_icons:
     dependency: "direct main"
     description:
